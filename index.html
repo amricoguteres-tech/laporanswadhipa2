@@ -91,7 +91,7 @@
 		let savedSession = JSON.parse(localStorage.getItem('laporSession') || 'null');
 		let lastPendingCount = null;
 		let originalPageTitle = document.title;
-		const API_BASE = window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '';
+		const API_BASE = window.APP_API_BASE || (window.location.protocol === 'file:' ? 'http://127.0.0.1:8000' : '');
 		const $ = (s) => document.querySelector(s);
 		function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[character])); }
 		async function apiRequest(path, options = {}) { const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }; if (authToken) headers.Authorization = `Bearer ${authToken}`; return fetch(`${API_BASE}${path}`, { ...options, headers }); }

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: laporanswadhipa2-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        generateValue: true
