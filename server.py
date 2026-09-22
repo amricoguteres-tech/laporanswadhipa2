@@ -280,7 +280,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self' https://cdn.phototourl.com; connect-src 'self' https:; img-src 'self' https://cdn.phototourl.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self' https://cdn.phototourl.com; connect-src 'self' https:; img-src 'self' https://cdn.phototourl.com data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
