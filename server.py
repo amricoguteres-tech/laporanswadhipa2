@@ -16,8 +16,10 @@ from cryptography.fernet import Fernet, InvalidToken
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = BASE_DIR / "laporswadhipa2.db"
 ADMIN_EMAIL = "admin@sekolah.id"
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "adminswadhipa123")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
 ENCRYPTION_KEY_PATH = BASE_DIR / ".app_encryption.key"
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "https://amricoguteres-tech.github.io")
+SESSION_TTL_SECONDS = 8 * 60 * 60
 USER_DATA_FIELDS = ("email", "name", "className", "major")
 ENCRYPTED_PREFIX = "enc$"
 SESSIONS = {}
@@ -205,9 +207,6 @@ def verify_password(password, stored):
     return hmac.compare_digest(password, stored)
 
 
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH") or hash_password(ADMIN_PASSWORD)
-
-
 def valid_identifier(value):
     return bool(re.fullmatch(r"[A-Za-z0-9._@+-]{1,120}", value or ""))
 
@@ -259,7 +258,12 @@ def authenticated(handler):
 
 def session_user(handler):
     token = handler.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    return SESSIONS.get(token)
+    session = SESSIONS.get(token)
+    if session and session.get("expiresAt", 0) > time.time():
+        return session
+    if session:
+        SESSIONS.pop(token, None)
+    return None
 
 
 def admin_authenticated(handler):
@@ -276,7 +280,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -286,7 +290,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.end_headers()
@@ -337,7 +341,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             is_admin_login = not payload.get("nis", "").strip() and bool(payload.get("email") or payload.get("password"))
             if is_admin_login:
-                valid_login = payload.get("email", "").strip().lower() == ADMIN_EMAIL and verify_password(str(payload.get("password", "")), ADMIN_PASSWORD_HASH)
+                valid_login = payload.get("email", "").strip().lower() == ADMIN_EMAIL and bool(ADMIN_PASSWORD_HASH) and verify_password(str(payload.get("password", "")), ADMIN_PASSWORD_HASH)
                 user = {"role": "admin", "name": "Bu Anisa Pratama"}
                 error_message = "Email atau kata sandi admin salah."
             else:
@@ -357,7 +361,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 self.send_json(401, {"error": error_message})
                 return
             token = secrets.token_urlsafe(32)
-            SESSIONS[token] = user
+            SESSIONS[token] = {**user, "expiresAt": time.time() + SESSION_TTL_SECONDS}
             self.send_json(200, {"token": token, **user})
             return
         if path == "/api/reports":
@@ -499,9 +503,10 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    if not ADMIN_PASSWORD_HASH:
+        raise RuntimeError("ADMIN_PASSWORD_HASH wajib diatur; password admin default dinonaktifkan.")
     init_db()
     print("SMKSWADHIPA2NATAR berjalan di http://0.0.0.0:8000 (akses LAN menggunakan IP komputer ini)")
     print(f"SQLite: {DATABASE_PATH}")
-    print(f"Login admin: {ADMIN_EMAIL} (password disimpan melalui konfigurasi environment atau default lokal)")
     port = int(os.getenv("PORT", "8000"))
     ThreadingHTTPServer(("0.0.0.0", port), AppHandler).serve_forever()
