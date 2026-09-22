@@ -503,4 +503,5 @@ if __name__ == "__main__":
     print("SMKSWADHIPA2NATAR berjalan di http://0.0.0.0:8000 (akses LAN menggunakan IP komputer ini)")
     print(f"SQLite: {DATABASE_PATH}")
     print(f"Login admin: {ADMIN_EMAIL} (password disimpan melalui konfigurasi environment atau default lokal)")
-    ThreadingHTTPServer(("0.0.0.0", 8000), AppHandler).serve_forever()
+    port = int(os.getenv("PORT", "8000"))
+    ThreadingHTTPServer(("0.0.0.0", port), AppHandler).serve_forever()
