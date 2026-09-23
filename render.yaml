@@ -6,6 +6,10 @@ services:
     startCommand: python server.py
     envVars:
       - key: ADMIN_PASSWORD_HASH
-        sync: false
+        value: "pbkdf2_sha256$210000$9b3cfa348e2fe6f2ee610a0d910c9183$51fbb83fe0f393c4147202c1f8da350457a8bc1b7c32f519aa5ef05bf1ff30ee"
       - key: APP_ENCRYPTION_KEY
         generateValue: true
+      - key: ALLOWED_ORIGIN
+        value: "https://dc818021.laporswadhipa2.pages.dev"
+      - key: ADMIN_PASSWORD_DEFAULT
+        value: "Admin12345"

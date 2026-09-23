@@ -16,9 +16,18 @@ from cryptography.fernet import Fernet, InvalidToken
 BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = BASE_DIR / "laporswadhipa2.db"
 ADMIN_EMAIL = "admin@sekolah.id"
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD_DEFAULT", "Admin12345")
+ADMIN_PASSWORD_HASH_PATH = BASE_DIR / ".admin_password_hash"
 ENCRYPTION_KEY_PATH = BASE_DIR / ".app_encryption.key"
-ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "https://amricoguteres-tech.github.io")
+DEFAULT_ALLOWED_ORIGINS = {
+    "https://dc818021.laporswadhipa2.pages.dev",
+    "https://ebee416d.laporswadhipa2.pages.dev",
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "https://dc818021.laporswadhipa2.pages.dev")
 SESSION_TTL_SECONDS = 8 * 60 * 60
 USER_DATA_FIELDS = ("email", "name", "className", "major")
 ENCRYPTED_PREFIX = "enc$"
@@ -142,6 +151,29 @@ def master_json(row):
     return item
 
 
+def hash_password(password):
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 210_000)
+    return f"pbkdf2_sha256$210000${salt.hex()}${digest.hex()}"
+
+
+def resolve_admin_password_hash():
+    configured_hash = os.getenv("ADMIN_PASSWORD_HASH")
+    if configured_hash:
+        return configured_hash
+    if ADMIN_PASSWORD_HASH_PATH.exists():
+        stored_hash = ADMIN_PASSWORD_HASH_PATH.read_text(encoding="utf-8").strip()
+        if stored_hash:
+            return stored_hash
+    default_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
+    ADMIN_PASSWORD_HASH_PATH.write_text(default_hash, encoding="utf-8")
+    try:
+        os.chmod(ADMIN_PASSWORD_HASH_PATH, 0o600)
+    except OSError:
+        pass
+    return default_hash
+
+
 def load_encryption_cipher():
     configured_key = os.getenv("APP_ENCRYPTION_KEY")
     if configured_key:
@@ -161,6 +193,7 @@ def load_encryption_cipher():
         raise RuntimeError("APP_ENCRYPTION_KEY tidak valid.") from None
 
 
+ADMIN_PASSWORD_HASH = resolve_admin_password_hash()
 ENCRYPTION_CIPHER = load_encryption_cipher()
 
 
@@ -188,12 +221,6 @@ def migrate_student_data():
         }
         if any(values[field] != student[field] for field in USER_DATA_FIELDS):
             db_update("students", "id = ?", (student["id"],), values)
-
-
-def hash_password(password):
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 210_000)
-    return f"pbkdf2_sha256$210000${salt.hex()}${digest.hex()}"
 
 
 def verify_password(password, stored):
@@ -276,11 +303,15 @@ class AppHandler(BaseHTTPRequestHandler):
         print(f"{self.address_string()} - {format_string % args}")
 
     def send_json(self, status, payload):
+        origin = self.headers.get("Origin")
+        allowed_origin = ALLOWED_ORIGIN
+        if origin and (origin in DEFAULT_ALLOWED_ORIGINS or origin == ALLOWED_ORIGIN):
+            allowed_origin = origin
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
+        self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "no-referrer")
@@ -289,8 +320,12 @@ class AppHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        origin = self.headers.get("Origin")
+        allowed_origin = ALLOWED_ORIGIN
+        if origin and (origin in DEFAULT_ALLOWED_ORIGINS or origin == ALLOWED_ORIGIN):
+            allowed_origin = origin
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
+        self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.end_headers()
@@ -503,10 +538,9 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    if not ADMIN_PASSWORD_HASH:
-        raise RuntimeError("ADMIN_PASSWORD_HASH wajib diatur; password admin default dinonaktifkan.")
     init_db()
     print("SMKSWADHIPA2NATAR berjalan di http://0.0.0.0:8000 (akses LAN menggunakan IP komputer ini)")
     print(f"SQLite: {DATABASE_PATH}")
+    print(f"Login admin: {ADMIN_EMAIL} (password default lokal: {DEFAULT_ADMIN_PASSWORD})")
     port = int(os.getenv("PORT", "8000"))
     ThreadingHTTPServer(("0.0.0.0", port), AppHandler).serve_forever()

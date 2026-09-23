@@ -2,3 +2,12 @@
 laporswadhipa2.db
 __pycache__/
 *.pyc
+.app_encryption.key
+.admin_password_hash
+laporswadhipa2.db
+.wrangler/
+.vscode/
+.venv/
+__pycache__/
+*.pyc
+*.pyo

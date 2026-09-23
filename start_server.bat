@@ -21,10 +21,8 @@ if exist requirements.txt (
 )
 
 if not defined ADMIN_PASSWORD_HASH (
-    echo ADMIN_PASSWORD_HASH belum diatur.
-    echo Buat hash dengan: py -c "from server import hash_password; print(hash_password('PasswordBaruAnda'))"
-    pause
-    exit /b 1
+    echo ADMIN_PASSWORD_HASH belum diatur; server akan memakai default lokal untuk akses cepat.
+    echo Login admin default: admin@sekolah.id / Admin12345
 )
 
 echo Menjalankan backend pada http://127.0.0.1:8000
