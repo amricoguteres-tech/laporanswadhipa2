@@ -40,7 +40,7 @@ MASTER_CONFIG = {
     "rooms": {"label": "ruangan", "fields": ("name", "building", "capacity")},
     "tools": {"label": "alat praktik", "fields": ("name", "category", "quantity", "condition", "room")},
     "students": {"label": "siswa", "fields": ("nis", "email", "password", "name", "className", "major")},
-    "teachers": {"label": "guru", "fields": ("nip", "name", "subject")},
+    "teachers": {"label": "guru", "fields": ("nip", "email", "password", "name", "subject")},
 }
 
 SEED_REPORTS = [
@@ -117,8 +117,13 @@ def init_db():
                 columns.append("banned INTEGER NOT NULL DEFAULT 0")
             columns.append("createdAt TEXT NOT NULL")
             connection.execute(f"CREATE TABLE IF NOT EXISTS {name} ({', '.join(columns)})")
+            existing_columns = {row[1] for row in connection.execute(f"PRAGMA table_info({name})")}
+            for field in config["fields"]:
+                if field not in existing_columns:
+                    connection.execute(f"ALTER TABLE {name} ADD COLUMN {field} TEXT NOT NULL DEFAULT ''")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS students_nis ON students(nis)")
         connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS students_email ON students(email)")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS teachers_email ON teachers(email) WHERE email != ''")
         report_count = connection.execute("SELECT COUNT(*) FROM reports").fetchone()[0]
     if report_count == 0:
         now = datetime.now()
@@ -148,7 +153,8 @@ def master_json(row):
     item.pop("password", None)
     if "email" in item:
         for field in USER_DATA_FIELDS:
-            item[field] = decrypt_user_value(item[field])
+            if field in item:
+                item[field] = decrypt_user_value(item[field])
     if "banned" in item:
         item["banned"] = bool(item["banned"])
     return item
@@ -280,6 +286,8 @@ def clean_master_payload(collection_name, payload):
         return None
     if collection_name == "students" and (not valid_nis(values["nis"]) or len(values["password"]) < 8 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", values["email"])):
         return None
+    if collection_name == "teachers" and (not valid_identifier(values["nip"]) or len(values["password"]) < 8 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", values["email"])):
+        return None
     return values
 
 
@@ -365,7 +373,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if user is None:
                 self.send_json(401, {"error": "Login diperlukan."})
                 return
-            if user.get("role") == "admin":
+            if user.get("role") in ("admin", "teacher"):
                 rows = db_rows("reports")
             else:
                 rows = [
@@ -376,7 +384,10 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         master_parts = path.strip("/").split("/")
         if len(master_parts) == 2 and master_parts[0] == "api" and master_parts[1] in MASTER_CONFIG:
-            if not admin_authenticated(self):
+            if session_user(self) is None:
+                self.send_json(401, {"error": "Login diperlukan."})
+                return
+            if master_parts[1] not in ("rooms", "tools") and not admin_authenticated(self):
                 self.send_json(401, {"error": "Login admin diperlukan."})
                 return
             rows = db_rows(master_parts[1])
@@ -402,22 +413,23 @@ class AppHandler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 self.send_json(400, {"error": "Data login tidak valid."})
                 return
-            is_admin_login = not payload.get("nis", "").strip() and bool(payload.get("email") or payload.get("password"))
+            email = payload.get("email", "").strip().lower()
+            password = str(payload.get("password", ""))
+            is_admin_login = email == ADMIN_EMAIL
             if is_admin_login:
-                valid_login = payload.get("email", "").strip().lower() == ADMIN_EMAIL and bool(ADMIN_PASSWORD_HASH) and verify_password(str(payload.get("password", "")), ADMIN_PASSWORD_HASH)
+                valid_login = bool(ADMIN_PASSWORD_HASH) and verify_password(password, ADMIN_PASSWORD_HASH)
                 user = {"role": "admin", "name": "Bu Anisa Pratama"}
                 error_message = "Email atau kata sandi admin salah."
             else:
-                nis = payload.get("nis", "").strip()
-                email = payload.get("email", "").strip().lower()
-                password = payload.get("password", "")
-                student = db_one("students", "WHERE nis = ?", (nis,)) if valid_nis(nis) and password else None
-                password_valid = student is not None and verify_password(password, student.get("password", ""))
-                valid_login = password_valid and not student.get("banned", False) if student else False
-                if valid_login and not str(student.get("password", "")).startswith("pbkdf2_sha256$"):
-                    db_update("students", "nis = ?", (nis,), {"password": hash_password(password)})
-                user = {"role": "user", "nis": nis, "name": student.get("name", "Siswa") if student else "Siswa"}
-                error_message = "Email, password, atau NISN siswa tidak valid; atau akun sedang dibanned."
+                student = next((row for row in db_rows("students") if decrypt_user_value(row.get("email", "")).lower() == email), None)
+                teacher = next((row for row in db_rows("teachers") if decrypt_user_value(row.get("email", "")).lower() == email), None)
+                account = student or teacher
+                password_valid = account is not None and verify_password(password, account.get("password", ""))
+                valid_login = password_valid and not account.get("banned", False) if account else False
+                if valid_login and student is not None and not str(student.get("password", "")).startswith("pbkdf2_sha256$"):
+                    db_update("students", "id = ?", (student["id"],), {"password": hash_password(password)})
+                user = {"role": "teacher" if account is teacher else "user", "name": account.get("name", "Siswa") if account else "Siswa"}
+                error_message = "Email atau password tidak valid; atau akun sedang dibanned."
             if not valid_login:
                 self.send_json(401, {"error": error_message})
                 return
@@ -429,7 +441,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if not authenticated(self):
                 self.send_json(401, {"error": "Login admin diperlukan."})
                 return
-            required = ("title", "room", "category", "reporter", "detail")
+            required = ("title", "room", "category", "detail")
             if not isinstance(payload, dict) or any(not str(payload.get(key, "")).strip() for key in required):
                 self.send_json(400, {"error": "Data laporan belum lengkap."})
                 return
@@ -474,6 +486,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 values["password"] = hash_password(values["password"])
                 for field in USER_DATA_FIELDS:
                     values[field] = encrypt_user_value(values[field])
+            if collection_name == "teachers":
+                if any(decrypt_user_value(teacher["email"]).lower() == values["email"].lower() for teacher in db_rows("teachers") if teacher.get("email")):
+                    self.send_json(409, {"error": "NIP atau email guru sudah terdaftar."})
+                    return
+                values["email"] = encrypt_user_value(values["email"].lower())
+                values["password"] = hash_password(values["password"])
             item = {"id": secrets.token_hex(5).upper(), **values, "createdAt": datetime.now().isoformat()}
             if collection_name == "students":
                 item["banned"] = False
@@ -532,7 +550,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         path_parts = urlparse(self.path).path.strip("/").split("/")
-        if len(path_parts) != 3 or path_parts[0] != "api" or path_parts[1] not in ("rooms", "tools", "students"):
+        if len(path_parts) != 3 or path_parts[0] != "api" or path_parts[1] not in ("rooms", "tools", "students", "teachers"):
             self.send_json(404, {"error": "Rute tidak ditemukan."})
             return
         if not admin_authenticated(self):
