@@ -7,6 +7,6 @@
     "enabled": true
   },
   "vars": {
-    "API_PROXY_URL": "https://laporanswadhipa2-api.onrender.com"
+    "API_PROXY_URL": "https://laporanswadhipa2-api-production.up.railway.app"
   }
 }
