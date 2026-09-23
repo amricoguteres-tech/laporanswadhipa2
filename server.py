@@ -176,21 +176,35 @@ def resolve_admin_password_hash():
 
 def load_encryption_cipher():
     configured_key = os.getenv("APP_ENCRYPTION_KEY")
+    candidate_keys = []
+
     if configured_key:
-        key = configured_key.encode("ascii")
-    elif ENCRYPTION_KEY_PATH.exists():
-        key = ENCRYPTION_KEY_PATH.read_bytes().strip()
-    else:
-        key = Fernet.generate_key()
-        ENCRYPTION_KEY_PATH.write_bytes(key + b"\n")
+        candidate_keys.append(configured_key.encode("ascii"))
+    if ENCRYPTION_KEY_PATH.exists():
+        candidate_keys.append(ENCRYPTION_KEY_PATH.read_bytes().strip())
+
+    if not candidate_keys:
+        candidate_keys.append(Fernet.generate_key())
+        ENCRYPTION_KEY_PATH.write_bytes(candidate_keys[0] + b"\n")
         try:
             os.chmod(ENCRYPTION_KEY_PATH, 0o600)
         except OSError:
             pass
+
+    for key in candidate_keys:
+        try:
+            return Fernet(key)
+        except (ValueError, TypeError):
+            continue
+
+    new_key = Fernet.generate_key()
+    ENCRYPTION_KEY_PATH.write_bytes(new_key + b"\n")
     try:
-        return Fernet(key)
-    except (ValueError, TypeError):
-        raise RuntimeError("APP_ENCRYPTION_KEY tidak valid.") from None
+        os.chmod(ENCRYPTION_KEY_PATH, 0o600)
+    except OSError:
+        pass
+    print("APP_ENCRYPTION_KEY tidak valid; membuat kunci baru secara otomatis.")
+    return Fernet(new_key)
 
 
 ADMIN_PASSWORD_HASH = resolve_admin_password_hash()
@@ -240,6 +254,18 @@ def valid_identifier(value):
 
 def valid_nis(value):
     return bool(re.fullmatch(r"[0-9]{1,120}", value or ""))
+
+
+def allowed_origin_for(origin):
+    if not origin:
+        return ALLOWED_ORIGIN
+    if origin in DEFAULT_ALLOWED_ORIGINS or origin == ALLOWED_ORIGIN:
+        return origin
+    if origin.startswith("https://") and origin.endswith(".pages.dev"):
+        return origin
+    if origin.startswith("http://localhost") or origin.startswith("http://127.0.0.1"):
+        return origin
+    return ALLOWED_ORIGIN
 
 
 def clean_master_payload(collection_name, payload):
@@ -304,9 +330,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def send_json(self, status, payload):
         origin = self.headers.get("Origin")
-        allowed_origin = ALLOWED_ORIGIN
-        if origin and (origin in DEFAULT_ALLOWED_ORIGINS or origin == ALLOWED_ORIGIN):
-            allowed_origin = origin
+        allowed_origin = allowed_origin_for(origin)
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -321,9 +345,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def do_OPTIONS(self):
         origin = self.headers.get("Origin")
-        allowed_origin = ALLOWED_ORIGIN
-        if origin and (origin in DEFAULT_ALLOWED_ORIGINS or origin == ALLOWED_ORIGIN):
-            allowed_origin = origin
+        allowed_origin = allowed_origin_for(origin)
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", allowed_origin)
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
