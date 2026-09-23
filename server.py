@@ -14,11 +14,13 @@ from urllib.parse import urlparse
 from cryptography.fernet import Fernet, InvalidToken
 
 BASE_DIR = Path(__file__).resolve().parent
-DATABASE_PATH = BASE_DIR / "laporswadhipa2.db"
+DATA_DIR = Path(os.getenv("APP_DATA_DIR", str(BASE_DIR)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_PATH = DATA_DIR / "laporswadhipa2.db"
 ADMIN_EMAIL = "admin@sekolah.id"
 DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD_DEFAULT", "Admin12345")
-ADMIN_PASSWORD_HASH_PATH = BASE_DIR / ".admin_password_hash"
-ENCRYPTION_KEY_PATH = BASE_DIR / ".app_encryption.key"
+ADMIN_PASSWORD_HASH_PATH = DATA_DIR / ".admin_password_hash"
+ENCRYPTION_KEY_PATH = DATA_DIR / ".app_encryption.key"
 DEFAULT_ALLOWED_ORIGINS = {
     "https://dc818021.laporswadhipa2.pages.dev",
     "https://ebee416d.laporswadhipa2.pages.dev",
@@ -136,6 +138,7 @@ def init_db():
 def report_json(row):
     report = dict(row)
     report.pop("createdAt", None)
+    report["reporter"] = decrypt_user_value(report.get("reporter", ""))
     return report
 
 
@@ -365,7 +368,10 @@ class AppHandler(BaseHTTPRequestHandler):
             if user.get("role") == "admin":
                 rows = db_rows("reports")
             else:
-                rows = db_rows("reports", "WHERE reporter = ?", (user.get("name"),))
+                rows = [
+                    row for row in db_rows("reports")
+                    if decrypt_user_value(row.get("reporter", "")) == user.get("name")
+                ]
             self.send_json(200, {"reports": [report_json(row) for row in rows]})
             return
         master_parts = path.strip("/").split("/")
@@ -405,9 +411,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 nis = payload.get("nis", "").strip()
                 email = payload.get("email", "").strip().lower()
                 password = payload.get("password", "")
-                student = db_one("students", "WHERE nis = ?", (nis,)) if valid_nis(nis) and valid_identifier(email) and password else None
-                if student and decrypt_user_value(student.get("email", "")).lower() != email:
-                    student = None
+                student = db_one("students", "WHERE nis = ?", (nis,)) if valid_nis(nis) and password else None
                 password_valid = student is not None and verify_password(password, student.get("password", ""))
                 valid_login = password_valid and not student.get("banned", False) if student else False
                 if valid_login and not str(student.get("password", "")).startswith("pbkdf2_sha256$"):
